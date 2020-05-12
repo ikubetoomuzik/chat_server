@@ -3,70 +3,197 @@
 //
 
 // Imports
-use std::fmt;
-use uuid::Uuid;
-use colored::*;
 use chrono::{DateTime, Utc};
+use colored::*;
+use std::{fmt, fs::read_to_string, io, rc::Rc};
+use uuid::Uuid;
 
 // Interface-------------------------------------------------------------
 // Command Struct
-pub enum Command {
+pub enum Command {}
+
+fn get_input() -> String {
+    let mut input = String::new();
+    io::stdin()
+        .read_line(&mut input)
+        .expect("Failed to read line.");
+    input
 }
 
 // System----------------------------------------------------------------
+#[derive(Debug)]
+pub struct App {
+    pub users: Vec<User>,
+    pub convs: Vec<Conversation>,
+    pub msgs: Vec<Message>,
+    start: DateTime<Utc>,
+}
+
+impl App {
+    pub fn new() -> App {
+        App {
+            users: Vec::new(),
+            convs: Vec::new(),
+            msgs: Vec::new(),
+            start: Utc::now(),
+        }
+    }
+
+    pub fn load_users(&mut self, filename: &str) -> Result<(), &'static str> {
+        for line in read_to_string(filename).unwrap().lines() {
+            let mut line = line.split(';');
+            let id = match line.next() {
+                Some(id) => Uuid::parse_str(id).unwrap(),
+                None => return Err("Invalid Users file."),
+            };
+            let user = match line.next() {
+                Some(u) => u,
+                None => return Err("Invalid Users file."),
+            };
+            let email = match line.next() {
+                Some(e) => e,
+                None => return Err("Invalid Users file."),
+            };
+            let create_time: DateTime<Utc> = match line.next() {
+                Some(ct) => DateTime::from(DateTime::parse_from_rfc3339(ct).unwrap()),
+                None => return Err("Invalid Users file."),
+            };
+            self.users
+                .push(User::new(UserInfo::load(id, user, email, create_time)));
+        }
+        Ok(())
+    }
+
+    pub fn load_convs(&mut self, filename: &str) -> Result<(), &'static str> {
+        for line in read_to_string(filename).unwrap().lines() {
+            let mut line = line.split(';');
+            let id = match line.next() {
+                Some(id) => Uuid::parse_str(id).unwrap(),
+                None => return Err("Invalid Users file."),
+            };
+            let name = match line.next() {
+                Some(nm) => nm.to_string(),
+                None => return Err("Invalid Users file."),
+            };
+            let mems: Vec<&str> = match line.next() {
+                Some(m) => m.split(',').collect(),
+                None => return Err("Invalid Users file."),
+            };
+            let start: DateTime<Utc> = match line.next() {
+                Some(st) => DateTime::from(DateTime::parse_from_rfc3339(st).unwrap()),
+                None => return Err("Invalid Users file."),
+            };
+            let last_msg: DateTime<Utc> = match line.next() {
+                Some(lm) => DateTime::from(DateTime::parse_from_rfc3339(lm).unwrap()),
+                None => return Err("Invalid Users file."),
+            };
+            let mut members = Vec::new();
+            for mem in mems {
+                let mem = Uuid::parse_str(mem).unwrap();
+                if self.users.iter().any(|u| u.id() == mem) {
+                    members.push(Rc::clone(
+                        self.users.iter().find(|u| u.id() == mem).unwrap(),
+                    ))
+                }
+            }
+            self.convs.push(Conversation::new(ConvInfo::load(
+                id, &name, members, start, last_msg,
+            )));
+        }
+        Ok(())
+    }
+
+    pub fn load_msgs(&mut self, filename: &str) -> Result<(), &'static str> {
+        for line in read_to_string(filename).unwrap().lines() {
+            let mut line = line.split(';');
+            let id = match line.next() {
+                Some(id) => Uuid::parse_str(id).unwrap(),
+                None => return Err("Invalid Users file."),
+            };
+            let text = match line.next() {
+                Some(tx) => tx.to_string(),
+                None => return Err("Invalid Users file."),
+            };
+            let time_stamp: DateTime<Utc> = match line.next() {
+                Some(ts) => DateTime::from(DateTime::parse_from_rfc3339(ts).unwrap()),
+                None => return Err("Invalid Users file."),
+            };
+            let user = Rc::clone(
+                self.users
+                    .iter()
+                    .find(|u| u.id() == Uuid::parse_str(line.next().unwrap()).unwrap())
+                    .unwrap(),
+            );
+            let conv = Rc::clone(
+                self.convs
+                    .iter()
+                    .find(|c| c.id() == Uuid::parse_str(line.next().unwrap()).unwrap())
+                    .unwrap(),
+            );
+            self.msgs.push(Message::new(MsgInfo::load(
+                id, text, time_stamp, user, conv,
+            )));
+        }
+        Ok(())
+    }
+}
 
 // Message Struct
 #[derive(Debug)]
-struct Message {
+pub struct MsgInfo {
     id: Uuid,
     text: String,
     time_stamp: DateTime<Utc>,
     user: User,
+    conv: Conversation,
 }
 
-impl fmt::Display for Message {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "({} {}) --> [\"{}\"]",
-            "FROM:".red(),
-            self.user.name().cyan(),
-            self.text.bright_yellow()
-        )
-    }
-}
+type Message = Rc<MsgInfo>;
 
-impl Message {
-    fn new(user: User, text: String) -> Message {
-        Message {
+impl MsgInfo {
+    fn new(user: User, conv: Conversation, text: String) -> MsgInfo {
+        MsgInfo {
             id: Uuid::new_v4(),
             text,
             time_stamp: Utc::now(),
             user,
+            conv,
+        }
+    }
+
+    fn load(
+        id: Uuid,
+        text: String,
+        time_stamp: DateTime<Utc>,
+        user: User,
+        conv: Conversation,
+    ) -> MsgInfo {
+        MsgInfo {
+            id,
+            text,
+            time_stamp,
+            user,
+            conv,
         }
     }
 }
 
 // User Struct
 #[derive(Debug, PartialEq, Clone)]
-pub struct User {
+pub struct UserInfo {
     id: Uuid,
     name: String,
     email: String,
     create_time: DateTime<Utc>,
 }
 
-impl fmt::Display for User {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "({} --> {})", self.name.cyan(), self.email.red())
-    }
-}
+type User = Rc<UserInfo>;
 
-impl User {
-    pub fn new(name: &str, email: &str) -> User {
+impl UserInfo {
+    pub fn new(name: &str, email: &str) -> UserInfo {
         let name = name.to_string();
         let email = email.to_string();
-        User {
+        UserInfo {
             id: Uuid::new_v4(),
             name,
             email,
@@ -74,67 +201,86 @@ impl User {
         }
     }
 
-    pub fn id(&self) -> String {
-        self.id.to_string()
+    pub fn load(id: Uuid, name: &str, email: &str, create_time: DateTime<Utc>) -> UserInfo {
+        let name = name.to_string();
+        let email = email.to_string();
+        UserInfo {
+            id,
+            name,
+            email,
+            create_time,
+        }
     }
 
-    pub fn name(&self) -> String {
-        self.name.to_string()
+    pub fn send_msg(&self, app: &App) {
+        let convos = app
+            .convs
+            .iter()
+            .filter_map(|c| {
+                let s = app.users.iter().find(|u| u.id() == self.id()).unwrap();
+                if c.members.contains(s) {
+                    Some(c.name())
+                } else {
+                    None
+                }
+            })
+            .fold(String::new(), |acc, cn| format!("{}{} ", acc, cn));
+        println!("What would you like to say?");
+        let text = get_input();
+        println!("To what convo: {}?", convos);
+        let conv = get_input();
     }
 
-    pub fn send_msg(&self, conversation: &mut Conversation, text: String) {
-        let message = Message::new(self.clone(), text);
-        conversation.add_msg(self, message);
+    fn id(&self) -> Uuid {
+        self.id
     }
 }
 
 // Conversation Struct
 #[derive(Debug)]
-pub struct Conversation {
+pub struct ConvInfo {
     id: Uuid,
+    name: String,
     members: Vec<User>,
-    messages: Vec<Message>,
     start: DateTime<Utc>,
     last_msg: DateTime<Utc>,
 }
 
-impl fmt::Display for Conversation {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut users = String::new();
-        for m in &self.members {
-            users += &format!("{} ", m);
-        }
-        write!(
-            f,
-            "Users: {}\nLast Message: {}",
-            users,
-            self.messages.last().unwrap()
-        )
-    }
-}
+type Conversation = Rc<ConvInfo>;
 
-impl Conversation {
-    pub fn new(members: Vec<User>) -> Conversation {
+impl ConvInfo {
+    pub fn new(name: &str, members: Vec<User>) -> ConvInfo {
         let time = Utc::now();
-        Conversation {
+        ConvInfo {
             id: Uuid::new_v4(),
+            name: name.to_string(),
             members,
-            messages: Vec::new(),
             start: time,
             last_msg: time,
         }
     }
 
-    fn add_msg(&mut self, user: &User, msg: Message) {
-        if self.members.contains(user) {
-            self.last_msg = msg.time_stamp;
-            self.messages.push(msg);
+    pub fn load(
+        id: Uuid,
+        name: &str,
+        members: Vec<User>,
+        start: DateTime<Utc>,
+        last_msg: DateTime<Utc>,
+    ) -> ConvInfo {
+        ConvInfo {
+            id,
+            name: name.to_string(),
+            members,
+            start,
+            last_msg,
         }
     }
 
-    fn add_member(&mut self, member: User) {
-        if !self.members.contains(&member) {
-            self.members.push(member);
-        }
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    pub fn name(&self) -> String {
+        self.name.to_string()
     }
 }
