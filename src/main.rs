@@ -1,6 +1,4 @@
 use chat_server::*;
-use colored::*;
-use std::io;
 
 fn main() -> Result<(), &'static str> {
     let mut app = App::new();
@@ -10,7 +8,7 @@ fn main() -> Result<(), &'static str> {
 
     println!("{:#?}", app);
 
-    app.users[0].send_msg(&app);
+    app.users[0].borrow().send_msg(&app);
 
     Ok(())
 }

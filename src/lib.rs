@@ -4,8 +4,7 @@
 
 // Imports
 use chrono::{DateTime, Utc};
-use colored::*;
-use std::{fmt, fs::read_to_string, io, rc::Rc};
+use std::{cell::RefCell, fs::read_to_string, io, rc::Rc};
 use uuid::Uuid;
 
 // Interface-------------------------------------------------------------
@@ -44,22 +43,26 @@ impl App {
             let mut line = line.split(';');
             let id = match line.next() {
                 Some(id) => Uuid::parse_str(id).unwrap(),
-                None => return Err("Invalid Users file."),
+                None => return Err("Invalid $id in USERS file."),
             };
             let user = match line.next() {
                 Some(u) => u,
-                None => return Err("Invalid Users file."),
+                None => return Err("Invalid $name in USERS file."),
             };
             let email = match line.next() {
                 Some(e) => e,
-                None => return Err("Invalid Users file."),
+                None => return Err("Invalid $email in USERS file."),
             };
             let create_time: DateTime<Utc> = match line.next() {
                 Some(ct) => DateTime::from(DateTime::parse_from_rfc3339(ct).unwrap()),
-                None => return Err("Invalid Users file."),
+                None => return Err("Invalid $create_time in USERS file."),
             };
-            self.users
-                .push(User::new(UserInfo::load(id, user, email, create_time)));
+            self.users.push(User::new(RefCell::new(UserInfo::load(
+                id,
+                user,
+                email,
+                create_time,
+            ))));
         }
         Ok(())
     }
@@ -69,36 +72,37 @@ impl App {
             let mut line = line.split(';');
             let id = match line.next() {
                 Some(id) => Uuid::parse_str(id).unwrap(),
-                None => return Err("Invalid Users file."),
+                None => return Err("Invalid $id in CONVS file."),
             };
             let name = match line.next() {
                 Some(nm) => nm.to_string(),
-                None => return Err("Invalid Users file."),
+                None => return Err("Invalid $name in CONVS file."),
             };
             let mems: Vec<&str> = match line.next() {
                 Some(m) => m.split(',').collect(),
-                None => return Err("Invalid Users file."),
+                None => return Err("Invalid $mems list in CONVS file."),
             };
             let start: DateTime<Utc> = match line.next() {
                 Some(st) => DateTime::from(DateTime::parse_from_rfc3339(st).unwrap()),
-                None => return Err("Invalid Users file."),
+                None => return Err("Invalid $start time in CONVS file."),
             };
             let last_msg: DateTime<Utc> = match line.next() {
                 Some(lm) => DateTime::from(DateTime::parse_from_rfc3339(lm).unwrap()),
-                None => return Err("Invalid Users file."),
+                None => return Err("Invalid $last_msg time in CONVS file."),
             };
             let mut members = Vec::new();
             for mem in mems {
                 let mem = Uuid::parse_str(mem).unwrap();
-                if self.users.iter().any(|u| u.id() == mem) {
-                    members.push(Rc::clone(
-                        self.users.iter().find(|u| u.id() == mem).unwrap(),
+                if self.users.iter().any(|u| u.borrow().id() == mem) {
+                    members.push(User::clone(
+                        self.users.iter().find(|u| u.borrow().id() == mem).unwrap(),
                     ))
                 }
             }
-            self.convs.push(Conversation::new(ConvInfo::load(
-                id, &name, members, start, last_msg,
-            )));
+            self.convs
+                .push(Conversation::new(RefCell::new(ConvInfo::load(
+                    id, &name, members, start, last_msg,
+                ))));
         }
         Ok(())
     }
@@ -108,31 +112,31 @@ impl App {
             let mut line = line.split(';');
             let id = match line.next() {
                 Some(id) => Uuid::parse_str(id).unwrap(),
-                None => return Err("Invalid Users file."),
+                None => return Err("Invalid $id in MSGS file."),
             };
             let text = match line.next() {
                 Some(tx) => tx.to_string(),
-                None => return Err("Invalid Users file."),
+                None => return Err("Invalid $text in MSGS file."),
             };
             let time_stamp: DateTime<Utc> = match line.next() {
                 Some(ts) => DateTime::from(DateTime::parse_from_rfc3339(ts).unwrap()),
-                None => return Err("Invalid Users file."),
+                None => return Err("Invalid $time_stamp in MSGS file."),
             };
-            let user = Rc::clone(
+            let user = User::clone(
                 self.users
                     .iter()
-                    .find(|u| u.id() == Uuid::parse_str(line.next().unwrap()).unwrap())
+                    .find(|u| u.borrow().id() == Uuid::parse_str(line.next().unwrap()).unwrap())
                     .unwrap(),
             );
-            let conv = Rc::clone(
+            let conv = Conversation::clone(
                 self.convs
                     .iter()
-                    .find(|c| c.id() == Uuid::parse_str(line.next().unwrap()).unwrap())
+                    .find(|c| c.borrow().id() == Uuid::parse_str(line.next().unwrap()).unwrap())
                     .unwrap(),
             );
-            self.msgs.push(Message::new(MsgInfo::load(
+            self.msgs.push(Message::new(RefCell::new(MsgInfo::load(
                 id, text, time_stamp, user, conv,
-            )));
+            ))));
         }
         Ok(())
     }
@@ -148,7 +152,7 @@ pub struct MsgInfo {
     conv: Conversation,
 }
 
-type Message = Rc<MsgInfo>;
+type Message = Rc<RefCell<MsgInfo>>;
 
 impl MsgInfo {
     fn new(user: User, conv: Conversation, text: String) -> MsgInfo {
@@ -187,7 +191,7 @@ pub struct UserInfo {
     create_time: DateTime<Utc>,
 }
 
-type User = Rc<UserInfo>;
+type User = Rc<RefCell<UserInfo>>;
 
 impl UserInfo {
     pub fn new(name: &str, email: &str) -> UserInfo {
@@ -217,9 +221,14 @@ impl UserInfo {
             .convs
             .iter()
             .filter_map(|c| {
-                let s = app.users.iter().find(|u| u.id() == self.id()).unwrap();
+                let c = c.borrow();
+                let s = app
+                    .users
+                    .iter()
+                    .find(|u| u.borrow().id() == self.id())
+                    .unwrap();
                 if c.members.contains(s) {
-                    Some(c.name())
+                    Some(c.name().to_string())
                 } else {
                     None
                 }
@@ -231,8 +240,38 @@ impl UserInfo {
         let conv = get_input();
     }
 
-    fn id(&self) -> Uuid {
+    pub fn id(&self) -> Uuid {
         self.id
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn change_name(&mut self, name: &str) -> Result<(),&'static str> {
+        if self.name != name {
+            self.name = name.to_string()
+        } else {
+            return Err("That is already this user's name!")
+        }
+        Ok(())
+    }
+
+    pub fn email(&self) -> &str {
+        &self.email
+    }
+
+    pub fn change_email(&mut self, email: &str) -> Result<(),&'static str> {
+        if self.email != email {
+            self.email = email.to_string()
+        } else {
+            return Err("That is already this user's email!")
+        }
+        Ok(())
+    }
+
+    pub fn time(&self) -> DateTime<Utc> {
+        self.create_time
     }
 }
 
@@ -246,7 +285,7 @@ pub struct ConvInfo {
     last_msg: DateTime<Utc>,
 }
 
-type Conversation = Rc<ConvInfo>;
+type Conversation = Rc<RefCell<ConvInfo>>;
 
 impl ConvInfo {
     pub fn new(name: &str, members: Vec<User>) -> ConvInfo {
@@ -280,7 +319,7 @@ impl ConvInfo {
         self.id
     }
 
-    pub fn name(&self) -> String {
-        self.name.to_string()
+    pub fn name(&self) -> &str {
+        &self.name
     }
 }
