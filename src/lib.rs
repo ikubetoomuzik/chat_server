@@ -140,6 +140,97 @@ impl App {
         }
         Ok(())
     }
+
+    pub fn add_user(&mut self, name: &str, email: &str) -> Result<(), &'static str> {
+        if !self
+            .users
+            .iter()
+            .any(|u| u.borrow().name() == name && u.borrow().email() == email)
+        {
+            self.users
+                .push(User::new(RefCell::new(UserInfo::new(name, email))));
+            Ok(())
+        } else {
+            return Err("User already exists with that info!");
+        }
+    }
+
+    pub fn get_user(&self, name: Option<&str>, email: Option<&str>) -> Option<User> {
+        if name == None && email == None {
+            None
+        } else if name == None && email != None {
+            match self
+                .users
+                .iter()
+                .find(|u| u.borrow().email() == email.unwrap())
+            {
+                Some(ur) => Some(User::clone(ur)),
+                None => None,
+            }
+        } else if name != None && email == None {
+            match self
+                .users
+                .iter()
+                .find(|u| u.borrow().name() == name.unwrap())
+            {
+                Some(ur) => Some(User::clone(ur)),
+                None => None,
+            }
+        } else {
+            match self.users.iter().find(|u| {
+                u.borrow().name() == name.unwrap() && u.borrow().email() == email.unwrap()
+            }) {
+                Some(ur) => Some(User::clone(ur)),
+                None => None,
+            }
+        }
+    }
+
+    pub fn add_conv(&mut self, name: &str, members: Vec<User>) {
+        self.convs
+            .push(Conversation::new(RefCell::new(ConvInfo::new(
+                name, members,
+            ))))
+    }
+
+    pub fn get_conv(&self, name: Option<&str>, members: Option<Vec<User>>) -> Option<Conversation> {
+        if name == None && members == None {
+            None
+        } else if name != None && members == None {
+            match self.convs.iter().find(|c| c.borrow().name() == name.unwrap()) {
+                Some(cr) => Some(Conversation::clone(cr)),
+                None     => None,
+            }
+        } else if name == None && members != None {
+            let members = members.unwrap();
+            match self.convs.iter().find(move |c| members.iter().all(move |m| c.borrow().members.contains(m))) {
+                Some(cr) => Some(Conversation::clone(cr)),
+                None     => None,
+            }
+        } else {
+            let members = members.unwrap();
+            match self.convs.iter().find(move |c| c.borrow().name() == name.unwrap() && members.iter().all(move |m| c.borrow().members.contains(m))) {
+                Some(cr) => Some(Conversation::clone(cr)),
+                None     => None,
+            }
+        }
+    }
+
+    pub fn send_msg(
+        &mut self,
+        from: User,
+        to: Conversation,
+        text: &str,
+    ) -> Result<(), &'static str> {
+        if to.borrow().members.contains(&from) {
+            to.borrow_mut().new_msg();
+            self.msgs
+                .push(Message::new(RefCell::new(MsgInfo::new(from, to, text))));
+            Ok(())
+        } else {
+            return Err("User not in that conv.");
+        }
+    }
 }
 
 // Message Struct
@@ -152,13 +243,13 @@ pub struct MsgInfo {
     conv: Conversation,
 }
 
-type Message = Rc<RefCell<MsgInfo>>;
+pub type Message = Rc<RefCell<MsgInfo>>;
 
 impl MsgInfo {
-    fn new(user: User, conv: Conversation, text: String) -> MsgInfo {
+    fn new(user: User, conv: Conversation, text: &str) -> MsgInfo {
         MsgInfo {
             id: Uuid::new_v4(),
-            text,
+            text: text.to_string(),
             time_stamp: Utc::now(),
             user,
             conv,
@@ -191,7 +282,7 @@ pub struct UserInfo {
     create_time: DateTime<Utc>,
 }
 
-type User = Rc<RefCell<UserInfo>>;
+pub type User = Rc<RefCell<UserInfo>>;
 
 impl UserInfo {
     pub fn new(name: &str, email: &str) -> UserInfo {
@@ -216,28 +307,22 @@ impl UserInfo {
         }
     }
 
-    pub fn send_msg(&self, app: &App) {
-        let convos = app
-            .convs
-            .iter()
-            .filter_map(|c| {
-                let c = c.borrow();
-                let s = app
-                    .users
-                    .iter()
-                    .find(|u| u.borrow().id() == self.id())
-                    .unwrap();
-                if c.members.contains(s) {
-                    Some(c.name().to_string())
-                } else {
-                    None
-                }
-            })
-            .fold(String::new(), |acc, cn| format!("{}{} ", acc, cn));
-        println!("What would you like to say?");
-        let text = get_input();
-        println!("To what convo: {}?", convos);
-        let conv = get_input();
+    pub fn change_name(&mut self, name: &str) -> Result<(), &'static str> {
+        if self.name != name {
+            self.name = name.to_string()
+        } else {
+            return Err("That is already this user's name!");
+        }
+        Ok(())
+    }
+
+    pub fn change_email(&mut self, email: &str) -> Result<(), &'static str> {
+        if self.email != email {
+            self.email = email.to_string()
+        } else {
+            return Err("That is already this user's email!");
+        }
+        Ok(())
     }
 
     pub fn id(&self) -> Uuid {
@@ -248,26 +333,8 @@ impl UserInfo {
         &self.name
     }
 
-    pub fn change_name(&mut self, name: &str) -> Result<(),&'static str> {
-        if self.name != name {
-            self.name = name.to_string()
-        } else {
-            return Err("That is already this user's name!")
-        }
-        Ok(())
-    }
-
     pub fn email(&self) -> &str {
         &self.email
-    }
-
-    pub fn change_email(&mut self, email: &str) -> Result<(),&'static str> {
-        if self.email != email {
-            self.email = email.to_string()
-        } else {
-            return Err("That is already this user's email!")
-        }
-        Ok(())
     }
 
     pub fn time(&self) -> DateTime<Utc> {
@@ -285,7 +352,7 @@ pub struct ConvInfo {
     last_msg: DateTime<Utc>,
 }
 
-type Conversation = Rc<RefCell<ConvInfo>>;
+pub type Conversation = Rc<RefCell<ConvInfo>>;
 
 impl ConvInfo {
     pub fn new(name: &str, members: Vec<User>) -> ConvInfo {
@@ -313,6 +380,10 @@ impl ConvInfo {
             start,
             last_msg,
         }
+    }
+
+    pub fn new_msg(&mut self) {
+        self.last_msg = Utc::now()
     }
 
     pub fn id(&self) -> Uuid {
