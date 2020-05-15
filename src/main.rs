@@ -13,7 +13,7 @@ fn main() -> Result<(), &'static str> {
 
     println!("{:#?}", app);
 
-    app.add_user("Curtis Jones", "mail@curtisjones.ca")?;
+    // app.add_user("Curtis Jones", "mail@curtisjones.ca")?;
 
-    Ok(())
+    app.close("msgs", "convs", "users")
 }

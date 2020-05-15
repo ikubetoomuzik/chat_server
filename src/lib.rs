@@ -4,14 +4,20 @@
 
 // Imports
 use chrono::{DateTime, Utc};
-use std::{cell::RefCell, fs::read_to_string, io, rc::Rc};
+use std::{
+    cell::RefCell,
+    fs::{read_to_string, OpenOptions},
+    io,
+    io::prelude::*,
+    rc::Rc,
+};
 use uuid::Uuid;
 
 // Interface-------------------------------------------------------------
 // Command Struct
 pub enum Command {}
 
-fn get_input() -> String {
+fn _get_input() -> String {
     let mut input = String::new();
     io::stdin()
         .read_line(&mut input)
@@ -197,21 +203,32 @@ impl App {
         if name == None && members == None {
             None
         } else if name != None && members == None {
-            match self.convs.iter().find(|c| c.borrow().name() == name.unwrap()) {
+            match self
+                .convs
+                .iter()
+                .find(|c| c.borrow().name() == name.unwrap())
+            {
                 Some(cr) => Some(Conversation::clone(cr)),
-                None     => None,
+                None => None,
             }
         } else if name == None && members != None {
             let members = members.unwrap();
-            match self.convs.iter().find(move |c| members.iter().all(move |m| c.borrow().members.contains(m))) {
+            match self
+                .convs
+                .iter()
+                .find(move |c| members.iter().all(move |m| c.borrow().members.contains(m)))
+            {
                 Some(cr) => Some(Conversation::clone(cr)),
-                None     => None,
+                None => None,
             }
         } else {
             let members = members.unwrap();
-            match self.convs.iter().find(move |c| c.borrow().name() == name.unwrap() && members.iter().all(move |m| c.borrow().members.contains(m))) {
+            match self.convs.iter().find(move |c| {
+                c.borrow().name() == name.unwrap()
+                    && members.iter().all(move |m| c.borrow().members.contains(m))
+            }) {
                 Some(cr) => Some(Conversation::clone(cr)),
-                None     => None,
+                None => None,
             }
         }
     }
@@ -231,16 +248,110 @@ impl App {
             return Err("User not in that conv.");
         }
     }
+
+    pub fn close(
+        &mut self,
+        msg_file: &str,
+        conv_file: &str,
+        user_file: &str,
+    ) -> Result<(), &'static str> {
+        let messages = self.msgs.drain(..).fold(String::new(), |mut acc, m| {
+            let m = m.borrow();
+            acc += &m.id.to_string();
+            acc += ";";
+            acc += &m.text;
+            acc += ";";
+            acc += &m.time_stamp.to_rfc3339();
+            acc += ";";
+            acc += &m.user.borrow().id().to_string();
+            acc += ";";
+            acc += &m.conv.borrow().id().to_string();
+            acc += "\n";
+            acc
+        });
+        let mut msg_file = match OpenOptions::new().read(true).write(true).open(msg_file) {
+            Ok(f) => f,
+            Err(e) => {
+                println!("{}", e);
+                return Err("Error opening messages file!");
+            }
+        };
+        match msg_file.write_all(messages.as_bytes()) {
+            Ok(_) => println!("Messages file saved successfully!"),
+            Err(e) => {
+                println!("{}", e);
+                return Err("Error writing messages file!");
+            }
+        }
+
+        let convs = self.convs.drain(..).fold(String::new(), |mut acc, c| {
+            let mut c = c.borrow_mut();
+            acc += &c.id().to_string();
+            acc += ";";
+            acc += &c.name();
+            acc += ";";
+            acc += &c.members.drain(..).fold(String::new(), |acc, m| {
+                acc + &m.borrow().id().to_string() + ","
+            });
+            acc.pop();
+            acc += ";";
+            acc += &c.start.to_rfc3339();
+            acc += ";";
+            acc += &c.last_msg.to_rfc3339();
+            acc += "\n";
+            acc
+        });
+        let mut conv_file = match OpenOptions::new().read(true).write(true).open(conv_file) {
+            Ok(f) => f,
+            Err(e) => {
+                println!("{}", e);
+                return Err("Error opening conversations file!")
+        }};
+        match conv_file.write_all(convs.as_bytes()) {
+            Ok(_) => println!("Conversations file saved successfully!"),
+            Err(e) => {
+                println!("{}", e);
+                return Err("Error writing conversations file!")
+        }}
+
+        let users = self.users.drain(..).fold(String::new(), |mut acc, u| {
+            let u = u.borrow();
+            acc += &u.id().to_string();
+            acc += ";";
+            acc += u.name();
+            acc += ";";
+            acc += u.email();
+            acc += ";";
+            acc += &u.time().to_rfc3339();
+            acc += "\n";
+            acc
+        });
+        let mut user_file = match OpenOptions::new().read(true).write(true).open(user_file) {
+            Ok(f) => f,
+            Err(e) => {
+                println!("{}", e);
+                return Err("Error opening users file!")
+        }};
+        match user_file.write_all(users.as_bytes()) {
+            Ok(_) => println!("Users file saved successfully!"),
+            Err(e) => {
+                println!("{}", e);
+                return Err("Error writing users file!")
+        }}
+
+        println!("Goodbye! :)");
+        Ok(())
+    }
 }
 
 // Message Struct
 #[derive(Debug)]
 pub struct MsgInfo {
-    id: Uuid,
-    text: String,
-    time_stamp: DateTime<Utc>,
-    user: User,
-    conv: Conversation,
+    pub id: Uuid,
+    pub text: String,
+    pub time_stamp: DateTime<Utc>,
+    pub user: User,
+    pub conv: Conversation,
 }
 
 pub type Message = Rc<RefCell<MsgInfo>>;
