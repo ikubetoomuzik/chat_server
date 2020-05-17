@@ -192,6 +192,35 @@ impl App {
         }
     }
 
+    pub fn get_user_mult(&self, name: Option<&str>, email: Option<&str>) -> Option<Vec<User>> {
+        let mut list = Vec::new();
+        if name == None && email == None {
+            return None;
+        } else if name == None && email != None {
+            self.users
+                .iter()
+                .filter(|u| u.borrow().email() == email.unwrap())
+                .for_each(|u| list.push(User::clone(u)));
+        } else if name != None && email == None {
+            self.users
+                .iter()
+                .filter(|u| u.borrow().name() == name.unwrap())
+                .for_each(|u| list.push(User::clone(u)));
+        } else {
+            self.users
+                .iter()
+                .filter(|u| {
+                    u.borrow().name() == name.unwrap() && u.borrow().email() == email.unwrap()
+                })
+                .for_each(|u| list.push(User::clone(u)));
+        }
+        if list.is_empty() {
+            None
+        } else {
+            Some(list)
+        }
+    }
+
     pub fn add_conv(&mut self, name: &str, members: Vec<User>) {
         self.convs
             .push(Conversation::new(RefCell::new(ConvInfo::new(
@@ -230,6 +259,42 @@ impl App {
                 Some(cr) => Some(Conversation::clone(cr)),
                 None => None,
             }
+        }
+    }
+
+    pub fn get_conv_mult(
+        &self,
+        name: Option<&str>,
+        members: Option<Vec<User>>,
+    ) -> Option<Vec<Conversation>> {
+        let mut list = Vec::new();
+        if name == None && members == None {
+            return None;
+        } else if name == None && members != None {
+            let members = members.unwrap();
+            self.convs
+                .iter()
+                .filter(move |c| members.iter().all(move |m| c.borrow().members.contains(m)))
+                .for_each(|c| list.push(Conversation::clone(c)));
+        } else if name != None && members == None {
+            self.convs
+                .iter()
+                .filter(|c| c.borrow().name() == name.unwrap())
+                .for_each(|c| list.push(Conversation::clone(c)));
+        } else {
+            let members = members.unwrap();
+            self.convs
+                .iter()
+                .filter(move |c| {
+                    c.borrow().name() == name.unwrap()
+                        && members.iter().all(move |m| c.borrow().members.contains(m))
+                })
+                .for_each(|c| list.push(Conversation::clone(c)));
+        }
+        if list.is_empty() {
+            None
+        } else {
+            Some(list)
         }
     }
 
@@ -305,14 +370,16 @@ impl App {
             Ok(f) => f,
             Err(e) => {
                 println!("{}", e);
-                return Err("Error opening conversations file!")
-        }};
+                return Err("Error opening conversations file!");
+            }
+        };
         match conv_file.write_all(convs.as_bytes()) {
             Ok(_) => println!("Conversations file saved successfully!"),
             Err(e) => {
                 println!("{}", e);
-                return Err("Error writing conversations file!")
-        }}
+                return Err("Error writing conversations file!");
+            }
+        }
 
         let users = self.users.drain(..).fold(String::new(), |mut acc, u| {
             let u = u.borrow();
@@ -330,14 +397,16 @@ impl App {
             Ok(f) => f,
             Err(e) => {
                 println!("{}", e);
-                return Err("Error opening users file!")
-        }};
+                return Err("Error opening users file!");
+            }
+        };
         match user_file.write_all(users.as_bytes()) {
             Ok(_) => println!("Users file saved successfully!"),
             Err(e) => {
                 println!("{}", e);
-                return Err("Error writing users file!")
-        }}
+                return Err("Error writing users file!");
+            }
+        }
 
         println!("Goodbye! :)");
         Ok(())
