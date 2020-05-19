@@ -6,6 +6,7 @@
 use chrono::{DateTime, Utc};
 use std::{
     cell::RefCell,
+    collections::HashMap,
     fs::{read_to_string, OpenOptions},
     io,
     io::prelude::*,
@@ -28,9 +29,9 @@ fn _get_input() -> String {
 // System----------------------------------------------------------------
 #[derive(Debug)]
 pub struct App {
-    pub users: Vec<User>,
-    pub convs: Vec<Conversation>,
-    pub msgs: Vec<Message>,
+    users: Vec<User>,
+    convs: Vec<Conversation>,
+    msgs: Vec<Message>,
     start: DateTime<Utc>,
 }
 
@@ -59,16 +60,20 @@ impl App {
                 Some(e) => e,
                 None => return Err("Invalid $email in USERS file."),
             };
+            let friend_str = match line.next() {
+                Some(fs) => fs.to_string(),
+                None => "".to_string(),
+            };
+            let block_str = match line.next() {
+                Some(bs) => bs.to_string(),
+                None => "".to_string(),
+            };
             let create_time: DateTime<Utc> = match line.next() {
                 Some(ct) => DateTime::from(DateTime::parse_from_rfc3339(ct).unwrap()),
                 None => return Err("Invalid $create_time in USERS file."),
             };
-            self.users.push(User::new(RefCell::new(UserInfo::load(
-                id,
-                user,
-                email,
-                create_time,
-            ))));
+            let new_user = User::new(RefCell::new(UserInfo::load(id,user,email,create_time)));
+            self.users.push(new_user)
         }
         Ok(())
     }
@@ -199,18 +204,19 @@ impl App {
         } else if name == None && email != None {
             self.users
                 .iter()
-                .filter(|u| u.borrow().email() == email.unwrap())
+                .filter(|u| u.borrow().email().to_lowercase().contains(email.unwrap()))
                 .for_each(|u| list.push(User::clone(u)));
         } else if name != None && email == None {
             self.users
                 .iter()
-                .filter(|u| u.borrow().name() == name.unwrap())
+                .filter(|u| u.borrow().name().to_lowercase().contains(name.unwrap()))
                 .for_each(|u| list.push(User::clone(u)));
         } else {
             self.users
                 .iter()
                 .filter(|u| {
-                    u.borrow().name() == name.unwrap() && u.borrow().email() == email.unwrap()
+                    u.borrow().name().to_lowercase().contains(name.unwrap())
+                        && u.borrow().email().to_lowercase().contains(email.unwrap())
                 })
                 .for_each(|u| list.push(User::clone(u)));
         }
@@ -279,14 +285,14 @@ impl App {
         } else if name != None && members == None {
             self.convs
                 .iter()
-                .filter(|c| c.borrow().name() == name.unwrap())
+                .filter(|c| c.borrow().name().to_lowercase().contains(name.unwrap()))
                 .for_each(|c| list.push(Conversation::clone(c)));
         } else {
             let members = members.unwrap();
             self.convs
                 .iter()
                 .filter(move |c| {
-                    c.borrow().name() == name.unwrap()
+                    c.borrow().name().to_lowercase().contains(name.unwrap())
                         && members.iter().all(move |m| c.borrow().members.contains(m))
                 })
                 .for_each(|c| list.push(Conversation::clone(c)));
@@ -388,7 +394,7 @@ impl App {
             acc += u.name();
             acc += ";";
             acc += u.email();
-            acc += ";";
+            acc += ";;;";
             acc += &u.time().to_rfc3339();
             acc += "\n";
             acc
@@ -454,11 +460,13 @@ impl MsgInfo {
 }
 
 // User Struct
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct UserInfo {
     id: Uuid,
     name: String,
     email: String,
+    friends: Vec<User>,
+    blocked: Vec<User>,
     create_time: DateTime<Utc>,
 }
 
@@ -466,24 +474,60 @@ pub type User = Rc<RefCell<UserInfo>>;
 
 impl UserInfo {
     pub fn new(name: &str, email: &str) -> UserInfo {
-        let name = name.to_string();
-        let email = email.to_string();
         UserInfo {
             id: Uuid::new_v4(),
-            name,
-            email,
+            name: name.to_string(),
+            email: email.to_string(),
+            friends: Vec::new(),
+            blocked: Vec::new(),
             create_time: Utc::now(),
         }
     }
 
     pub fn load(id: Uuid, name: &str, email: &str, create_time: DateTime<Utc>) -> UserInfo {
-        let name = name.to_string();
-        let email = email.to_string();
         UserInfo {
             id,
-            name,
-            email,
+            name: name.to_string(),
+            email: email.to_string(),
+            friends: Vec::new(),
+            blocked: Vec::new(),
             create_time,
+        }
+    }
+
+    pub fn add_friend(&mut self, friend: &User) -> Result<(), &'static str> {
+        if self.blocked.contains(friend) {
+            return Err("User is blocked!");
+        }
+        if !self.friends.contains(friend) {
+            self.friends.push(User::clone(friend));
+            Ok(())
+        } else {
+            Err("User is already listed as a friend!")
+        }
+    }
+
+    pub fn add_friend_mult(&mut self, friends: Vec<User>) -> Result<(), &'static str> {
+        if self.blocked.iter().any(|b| friends.contains(b)) {
+            return Err("A User is blocked!");
+        }
+        if self.friends.iter().all(|f| !friends.contains(f)) {
+            self.friends = friends;
+            Ok(())
+        } else {
+            Err("User is already listed as a friend!")
+        }
+    }
+
+    pub fn add_blocked(&mut self, block: &User) -> Result<(), &'static str> {
+        if self.friends.contains(block) {
+            return Err("User is a friend!!");
+        }
+        if !self.blocked.contains(block) {
+            self.blocked.push(User::clone(block));
+            Ok(())
+        } else {
+            Err("User is already listed as blocked!")
         }
     }
 
