@@ -14,6 +14,10 @@ use std::{
 };
 use uuid::Uuid;
 
+// TCP server.
+
+mod tcp;
+
 // Interface-------------------------------------------------------------
 // Command Struct
 pub enum Command {}
