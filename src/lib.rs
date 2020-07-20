@@ -370,10 +370,12 @@ impl App {
         msg_file: &str,
         conv_file: &str,
         user_file: &str,
+        rel_file: &str,
     ) -> Result<(), &'static str> {
-        let messages = self.msgs.drain(..).fold(String::new(), |acc, m| {
-            acc + &m.borrow().to_string()
-        });
+        let messages = self
+            .msgs
+            .drain(..)
+            .fold(String::new(), |acc, m| acc + &m.borrow().to_string());
         let mut msg_file = match OpenOptions::new().read(true).write(true).open(msg_file) {
             Ok(f) => f,
             Err(e) => {
@@ -421,6 +423,25 @@ impl App {
         };
         match user_file.write_all(users.as_bytes()) {
             Ok(_) => println!("Users file saved successfully!"),
+            Err(e) => {
+                println!("{}", e);
+                return Err("Error writing users file!");
+            }
+        }
+
+        let rels = self
+            .rels
+            .drain(..)
+            .fold(String::new(), |acc, r| acc + &r.to_string());
+        let mut rel_file = match OpenOptions::new().read(true).write(true).open(rel_file) {
+            Ok(f) => f,
+            Err(e) => {
+                println!("{}", e);
+                return Err("Error opening rels file!");
+            }
+        };
+        match rel_file.write_all(rels.as_bytes()) {
+            Ok(_) => println!("Rels file saved successfully!"),
             Err(e) => {
                 println!("{}", e);
                 return Err("Error writing users file!");
@@ -494,6 +515,15 @@ enum RelStatus {
 }
 
 impl RelStatus {
+    fn to_string(&self) -> String {
+        match self {
+            RelStatus::BestFriends => "BestFriends".to_owned(),
+            RelStatus::Friends => "Friends".to_owned(),
+            RelStatus::Neutral => "Neutral".to_owned(),
+            RelStatus::Blocked(id) => format!("Blocked,{}", id.to_string()),
+        }
+    }
+
     fn from_str(input: &str) -> Option<RelStatus> {
         let mut input = input.split(',');
         match input.next().unwrap() {
@@ -516,6 +546,15 @@ struct Relationship {
 }
 
 impl Relationship {
+    fn to_string(&self) -> String {
+        format!(
+            "{};{};{},\n",
+            self.members[0].to_string(),
+            self.members[1].to_string(),
+            self.status.to_string()
+        )
+    }
+
     fn new(members: [Uuid; 2], status: Option<RelStatus>) -> Relationship {
         Relationship {
             members,
@@ -528,11 +567,11 @@ impl Relationship {
         }
     }
 
-    fn status(&self) -> RelStatus {
+    fn _status(&self) -> RelStatus {
         self.status
     }
 
-    fn change_status(&mut self, status: RelStatus) {
+    fn _change_status(&mut self, status: RelStatus) {
         self.status = status;
     }
 }
@@ -642,9 +681,9 @@ impl ConvInfo {
             "{};{};{};{};{}\n",
             self.id.to_string(),
             self.name,
-            self.members.iter().fold(String::new(), |acc, usr| {
-                acc + &usr.borrow().id().to_string()
-            }),
+            &self.members.iter().fold(String::new(), |acc, usr| {
+                acc + "," + &usr.borrow().id().to_string()
+            })[1..],
             self.start.to_rfc3339(),
             self.last_msg.to_rfc3339()
         )
