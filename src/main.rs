@@ -15,11 +15,12 @@ fn main() -> Result<(), &'static str> {
     // let convs = app.get_conv_mult(Some("bas"), None);
     
     let curtis = app.get_user(Some("Curtis Jones"), None).unwrap();
+    println!("{:#?}", curtis);
     let sarah = app.get_user(Some("Sarah Parsons"), None).unwrap();
 
-    // curtis.borrow_mut().add_friend(&sarah)?;
+    curtis.borrow_mut().add_friend(&sarah)?;
 
-    println!("{:#?}", curtis);
+    app.listen(8080);
 
     // app.add_user("Curtis Jones", "mail@curtisjones.ca")?;
 

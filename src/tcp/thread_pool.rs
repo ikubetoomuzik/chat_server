@@ -4,6 +4,7 @@
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
+#[derive(Debug)]
 pub struct ThreadPool {
     threads: Vec<Worker>,
     sender: mpsc::Sender<Job>,
@@ -30,6 +31,7 @@ impl ThreadPool {
     }
 }
 
+#[derive(Debug)]
 struct Worker {
     id: usize,
     thread: thread::JoinHandle<()>,

@@ -6,7 +6,6 @@
 use chrono::{DateTime, Utc};
 use std::{
     cell::RefCell,
-    collections::HashMap,
     fs::{read_to_string, OpenOptions},
     io,
     io::prelude::*,
@@ -36,7 +35,9 @@ pub struct App {
     users: Vec<User>,
     convs: Vec<Conversation>,
     msgs: Vec<Message>,
+    rels: Vec<Relationship>,
     start: DateTime<Utc>,
+    tcp: tcp::TcpServer,
 }
 
 impl App {
@@ -45,8 +46,45 @@ impl App {
             users: Vec::new(),
             convs: Vec::new(),
             msgs: Vec::new(),
+            rels: Vec::new(),
             start: Utc::now(),
+            tcp: tcp::TcpServer::new(4),
         }
+    }
+
+    pub fn listen(&mut self, port: u16) {
+        self.tcp.bind(port);
+
+        for stream in self.tcp.listener.as_ref().unwrap().incoming() {
+            let mut stream = stream.unwrap();
+            let mut buffer = [0; 512];
+            stream.read(&mut buffer).unwrap();
+            let req = String::from_utf8_lossy(&buffer[..]);
+            if req.starts_with("END") {
+                break;
+            }
+            println!("Request: {}", &req);
+        }
+    }
+
+    pub fn load_rels(&mut self, filename: &str) -> Result<(), &'static str> {
+        for line in read_to_string(filename).unwrap().lines() {
+            let mut line = line.split(';');
+            let mem1 = match line.next() {
+                Some(id) => Uuid::parse_str(id).unwrap(),
+                None => return Err("Invalid $mem1 in RELS file."),
+            };
+            let mem2 = match line.next() {
+                Some(id) => Uuid::parse_str(id).unwrap(),
+                None => return Err("Invalid $mem2 in RELS file."),
+            };
+            let status = match line.next() {
+                Some(stat) => RelStatus::from_str(stat),
+                None => return Err("Invalid $status in RELS file."),
+            };
+            self.rels.push(Relationship::new([mem1, mem2], status));
+        }
+        Ok(())
     }
 
     pub fn load_users(&mut self, filename: &str) -> Result<(), &'static str> {
@@ -64,20 +102,12 @@ impl App {
                 Some(e) => e,
                 None => return Err("Invalid $email in USERS file."),
             };
-            let friend_str = match line.next() {
-                Some(fs) => fs.to_string(),
-                None => "".to_string(),
-            };
-            let block_str = match line.next() {
-                Some(bs) => bs.to_string(),
-                None => "".to_string(),
-            };
             let create_time: DateTime<Utc> = match line.next() {
                 Some(ct) => DateTime::from(DateTime::parse_from_rfc3339(ct).unwrap()),
                 None => return Err("Invalid $create_time in USERS file."),
             };
-            let new_user = User::new(RefCell::new(UserInfo::load(id,user,email,create_time)));
-            self.users.push(new_user)
+            let new_user = User::new(RefCell::new(UserInfo::load(id, user, email, create_time)));
+            self.users.push(new_user);
         }
         Ok(())
     }
@@ -167,6 +197,17 @@ impl App {
             Ok(())
         } else {
             return Err("User already exists with that info!");
+        }
+    }
+
+    fn _find_user_id(&self, id: String) -> Option<User> {
+        match self
+            .users
+            .iter()
+            .find(|u| u.borrow().id().to_string() == id)
+        {
+            Some(ur) => Some(Rc::clone(ur)),
+            None => None,
         }
     }
 
@@ -330,19 +371,8 @@ impl App {
         conv_file: &str,
         user_file: &str,
     ) -> Result<(), &'static str> {
-        let messages = self.msgs.drain(..).fold(String::new(), |mut acc, m| {
-            let m = m.borrow();
-            acc += &m.id.to_string();
-            acc += ";";
-            acc += &m.text;
-            acc += ";";
-            acc += &m.time_stamp.to_rfc3339();
-            acc += ";";
-            acc += &m.user.borrow().id().to_string();
-            acc += ";";
-            acc += &m.conv.borrow().id().to_string();
-            acc += "\n";
-            acc
+        let messages = self.msgs.drain(..).fold(String::new(), |acc, m| {
+            acc + &m.borrow().to_string()
         });
         let mut msg_file = match OpenOptions::new().read(true).write(true).open(msg_file) {
             Ok(f) => f,
@@ -359,23 +389,10 @@ impl App {
             }
         }
 
-        let convs = self.convs.drain(..).fold(String::new(), |mut acc, c| {
-            let mut c = c.borrow_mut();
-            acc += &c.id().to_string();
-            acc += ";";
-            acc += &c.name();
-            acc += ";";
-            acc += &c.members.drain(..).fold(String::new(), |acc, m| {
-                acc + &m.borrow().id().to_string() + ","
-            });
-            acc.pop();
-            acc += ";";
-            acc += &c.start.to_rfc3339();
-            acc += ";";
-            acc += &c.last_msg.to_rfc3339();
-            acc += "\n";
-            acc
-        });
+        let convs = self
+            .convs
+            .drain(..)
+            .fold(String::new(), |acc, c| acc + &c.borrow().to_string());
         let mut conv_file = match OpenOptions::new().read(true).write(true).open(conv_file) {
             Ok(f) => f,
             Err(e) => {
@@ -391,18 +408,10 @@ impl App {
             }
         }
 
-        let users = self.users.drain(..).fold(String::new(), |mut acc, u| {
-            let u = u.borrow();
-            acc += &u.id().to_string();
-            acc += ";";
-            acc += u.name();
-            acc += ";";
-            acc += u.email();
-            acc += ";;;";
-            acc += &u.time().to_rfc3339();
-            acc += "\n";
-            acc
-        });
+        let users = self
+            .users
+            .drain(..)
+            .fold(String::new(), |acc, u| acc + &u.borrow().to_string());
         let mut user_file = match OpenOptions::new().read(true).write(true).open(user_file) {
             Ok(f) => f,
             Err(e) => {
@@ -436,6 +445,17 @@ pub struct MsgInfo {
 pub type Message = Rc<RefCell<MsgInfo>>;
 
 impl MsgInfo {
+    fn to_string(&self) -> String {
+        format!(
+            "{};{};{};{};{}\n",
+            self.id.to_string(),
+            self.text,
+            self.time_stamp.to_rfc3339(),
+            self.user.borrow().id().to_string(),
+            self.conv.borrow().id().to_string()
+        )
+    }
+
     fn new(user: User, conv: Conversation, text: &str) -> MsgInfo {
         MsgInfo {
             id: Uuid::new_v4(),
@@ -463,14 +483,67 @@ impl MsgInfo {
     }
 }
 
+// Relationship Struct
+//
+#[derive(Debug, Copy, Clone)]
+enum RelStatus {
+    BestFriends,
+    Friends,
+    Neutral,
+    Blocked(Uuid),
+}
+
+impl RelStatus {
+    fn from_str(input: &str) -> Option<RelStatus> {
+        let mut input = input.split(',');
+        match input.next().unwrap() {
+            "BestFriends" => Some(RelStatus::BestFriends),
+            "Friends" => Some(RelStatus::Friends),
+            "Neutral" => Some(RelStatus::Neutral),
+            "Blocked" => {
+                let user = Uuid::parse_str(input.next().unwrap()).unwrap();
+                Some(RelStatus::Blocked(user))
+            }
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct Relationship {
+    pub members: [Uuid; 2],
+    status: RelStatus,
+}
+
+impl Relationship {
+    fn new(members: [Uuid; 2], status: Option<RelStatus>) -> Relationship {
+        Relationship {
+            members,
+            status: {
+                match status {
+                    Some(stat) => stat,
+                    None => RelStatus::Neutral,
+                }
+            },
+        }
+    }
+
+    fn status(&self) -> RelStatus {
+        self.status
+    }
+
+    fn change_status(&mut self, status: RelStatus) {
+        self.status = status;
+    }
+}
+
 // User Struct
+//
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct UserInfo {
     id: Uuid,
     name: String,
     email: String,
-    friends: Vec<User>,
-    blocked: Vec<User>,
     create_time: DateTime<Utc>,
 }
 
@@ -482,8 +555,6 @@ impl UserInfo {
             id: Uuid::new_v4(),
             name: name.to_string(),
             email: email.to_string(),
-            friends: Vec::new(),
-            blocked: Vec::new(),
             create_time: Utc::now(),
         }
     }
@@ -493,46 +564,18 @@ impl UserInfo {
             id,
             name: name.to_string(),
             email: email.to_string(),
-            friends: Vec::new(),
-            blocked: Vec::new(),
             create_time,
         }
     }
 
-    pub fn add_friend(&mut self, friend: &User) -> Result<(), &'static str> {
-        if self.blocked.contains(friend) {
-            return Err("User is blocked!");
-        }
-        if !self.friends.contains(friend) {
-            self.friends.push(User::clone(friend));
-            Ok(())
-        } else {
-            Err("User is already listed as a friend!")
-        }
-    }
-
-    pub fn add_friend_mult(&mut self, friends: Vec<User>) -> Result<(), &'static str> {
-        if self.blocked.iter().any(|b| friends.contains(b)) {
-            return Err("A User is blocked!");
-        }
-        if self.friends.iter().all(|f| !friends.contains(f)) {
-            self.friends = friends;
-            Ok(())
-        } else {
-            Err("User is already listed as a friend!")
-        }
-    }
-
-    pub fn add_blocked(&mut self, block: &User) -> Result<(), &'static str> {
-        if self.friends.contains(block) {
-            return Err("User is a friend!!");
-        }
-        if !self.blocked.contains(block) {
-            self.blocked.push(User::clone(block));
-            Ok(())
-        } else {
-            Err("User is already listed as blocked!")
-        }
+    pub fn to_string(&self) -> String {
+        format!(
+            "{};{};{};{}\n",
+            self.id.to_string(),
+            self.name,
+            self.email,
+            self.create_time.to_rfc3339()
+        )
     }
 
     pub fn change_name(&mut self, name: &str) -> Result<(), &'static str> {
@@ -592,6 +635,19 @@ impl ConvInfo {
             start: time,
             last_msg: time,
         }
+    }
+
+    pub fn to_string(&self) -> String {
+        format!(
+            "{};{};{};{};{}\n",
+            self.id.to_string(),
+            self.name,
+            self.members.iter().fold(String::new(), |acc, usr| {
+                acc + &usr.borrow().id().to_string()
+            }),
+            self.start.to_rfc3339(),
+            self.last_msg.to_rfc3339()
+        )
     }
 
     pub fn load(
