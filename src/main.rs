@@ -17,7 +17,9 @@ fn main() -> Result<(), &'static str> {
 
     let curtis = app.get_user(Some("Curtis Jones"), None).unwrap();
     println!("{:#?}", curtis);
-    // let sarah = app.get_user(Some("Sarah Parsons"), None).unwrap();
+    let sarah = app.get_user(Some("Sarah Parsons"), None).unwrap();
+
+    println!("{:#?}", app.get_rel_status(curtis, sarah));
 
     app.listen(8080);
 

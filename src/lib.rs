@@ -54,7 +54,6 @@ impl App {
 
     pub fn listen(&mut self, port: u16) {
         self.tcp.bind(port);
-
         for stream in self.tcp.listener.as_ref().unwrap().incoming() {
             let mut stream = stream.unwrap();
             let mut buffer = [0; 512];
@@ -184,6 +183,16 @@ impl App {
             ))));
         }
         Ok(())
+    }
+
+    pub fn get_rel_status(&self, user1: User, user2: User) -> RelStatus {
+        let user1 = user1.borrow().id();
+        let user2 = user2.borrow().id();
+
+        match self.rels.iter().find(|r| { r.members.contains(&user1) && r.members.contains(&user2) }) {
+            Some(rel) => rel.status(),
+            None => RelStatus::Neutral,
+        }
     }
 
     pub fn add_user(&mut self, name: &str, email: &str) -> Result<(), &'static str> {
@@ -507,7 +516,7 @@ impl MsgInfo {
 // Relationship Struct
 //
 #[derive(Debug, Copy, Clone)]
-enum RelStatus {
+pub enum RelStatus {
     BestFriends,
     Friends,
     Neutral,
@@ -567,7 +576,7 @@ impl Relationship {
         }
     }
 
-    fn _status(&self) -> RelStatus {
+    fn status(&self) -> RelStatus {
         self.status
     }
 
