@@ -63,11 +63,6 @@ pub struct App {
     start: DateTime<Utc>,
 }
 
-enum ConvSearch {
-    Name(String),
-    Members(Vec<User>),
-}
-
 impl App {
     pub fn new() -> App {
         App {
@@ -147,18 +142,21 @@ impl App {
                             result.to_string()
                         }
                         "MEMBERS" => {
-                            let mut search : Vec<&str> = search.split(|c| c == ',' || c == '\n').collect();
-                            println!("{:#?}",search);
+                            let mut search: Vec<&str> =
+                                search.split(|c| c == ',' || c == '\n').collect();
                             search.pop();
-                            println!("{:#?}",search);
                             if search.len() == 0 {
                                 return String::from("NO VALID USERS PROVIDED");
                             }
-                            let search : Vec<Option<User>> = search.iter().map(|id| self.get_user("ID",id)).collect();
+                            let search: Vec<Option<User>> =
+                                search.iter().map(|id| self.get_user("ID", id)).collect();
                             if search.contains(&None) {
                                 return String::from("INVALID USER PROVIDED");
                             }
-                            let search = search.iter().map(|u| User::clone(u.as_ref().unwrap())).collect();
+                            let search = search
+                                .iter()
+                                .map(|u| User::clone(u.as_ref().unwrap()))
+                                .collect();
                             let search = ConvSearch::Members(search);
                             let result = match self.get_conv(search) {
                                 Some(c) => c,
@@ -167,7 +165,46 @@ impl App {
                             let result = result.borrow();
                             result.to_string()
                         }
-                        "MULT" => String::new(),
+                        "MULT" => match search {
+                            "NAME" => {
+                                let extra = ConvSearch::Name(String::from(extra.trim()));
+                                let result = match self.get_conv_mult(extra) {
+                                    Some(c) => c,
+                                    None => return String::from("NO CONVS FOUND"),
+                                };
+                                result.iter().fold(String::new(), |acc, c| {
+                                    let c = c.borrow();
+                                    format!("{}{}", acc, c.to_string())
+                                })
+                            }
+                            "MEMBERS" => {
+                                let mut extra: Vec<&str> =
+                                    extra.split(|c| c == ',' || c == '\n').collect();
+                                extra.pop();
+                                if extra.len() == 0 {
+                                    return String::from("NO VALID USERS PROVIDED");
+                                }
+                                let extra: Vec<Option<User>> =
+                                    extra.iter().map(|id| self.get_user("ID", id)).collect();
+                                if extra.contains(&None) {
+                                    return String::from("INVALID USER PROVIDED");
+                                }
+                                let extra = extra
+                                    .iter()
+                                    .map(|u| User::clone(u.as_ref().unwrap()))
+                                    .collect();
+                                let extra = ConvSearch::Members(extra);
+                                let result = match self.get_conv_mult(extra) {
+                                    Some(c) => c,
+                                    None => return String::from("NO CONVS FOUND"),
+                                };
+                                result.iter().fold(String::new(), |acc, c| {
+                                    let c = c.borrow();
+                                    format!("{}{}", acc, c.to_string())
+                                })
+                            }
+                            _ => return String::from("INCOMPLETE GET CONV MULT <_> COMMAND"),
+                        },
                         _ => String::new(),
                     }
                 }
@@ -182,6 +219,9 @@ impl App {
 
     pub fn load_rels(&mut self, filename: &str) -> Result<(), &'static str> {
         for line in read_to_string(filename).unwrap().lines() {
+            if line.starts_with("#") {
+                continue;
+            }
             let mut line = line.split(';');
             let mem1 = match line.next() {
                 Some(id) => Uuid::parse_str(id).unwrap(),
@@ -202,6 +242,9 @@ impl App {
 
     pub fn load_users(&mut self, filename: &str) -> Result<(), &'static str> {
         for line in read_to_string(filename).unwrap().lines() {
+            if line.starts_with("#") {
+                continue;
+            }
             let mut line = line.split(';');
             let id = match line.next() {
                 Some(id) => Uuid::parse_str(id).unwrap(),
@@ -227,6 +270,9 @@ impl App {
 
     pub fn load_convs(&mut self, filename: &str) -> Result<(), &'static str> {
         for line in read_to_string(filename).unwrap().lines() {
+            if line.starts_with("#") {
+                continue;
+            }
             let mut line = line.split(';');
             let id = match line.next() {
                 Some(id) => Uuid::parse_str(id).unwrap(),
@@ -267,6 +313,9 @@ impl App {
 
     pub fn load_msgs(&mut self, filename: &str) -> Result<(), &'static str> {
         for line in read_to_string(filename).unwrap().lines() {
+            if line.starts_with("#") {
+                continue;
+            }
             let mut line = line.split(';');
             let id = match line.next() {
                 Some(id) => Uuid::parse_str(id).unwrap(),
@@ -410,39 +459,36 @@ impl App {
         }
     }
 
-    pub fn get_conv_mult(
-        &self,
-        name: Option<&str>,
-        members: Option<Vec<User>>,
-    ) -> Option<Vec<Conversation>> {
-        let mut list = Vec::new();
-        if name == None && members == None {
-            return None;
-        } else if name == None && members != None {
-            let members = members.unwrap();
-            self.convs
-                .iter()
-                .filter(move |c| members.iter().all(move |m| c.borrow().members.contains(m)))
-                .for_each(|c| list.push(Conversation::clone(c)));
-        } else if name != None && members == None {
-            self.convs
-                .iter()
-                .filter(|c| c.borrow().name().to_lowercase().contains(name.unwrap()))
-                .for_each(|c| list.push(Conversation::clone(c)));
-        } else {
-            let members = members.unwrap();
-            self.convs
-                .iter()
-                .filter(move |c| {
-                    c.borrow().name().to_lowercase().contains(name.unwrap())
-                        && members.iter().all(move |m| c.borrow().members.contains(m))
-                })
-                .for_each(|c| list.push(Conversation::clone(c)));
-        }
-        if list.is_empty() {
-            None
-        } else {
-            Some(list)
+    fn get_conv_mult(&self, search: ConvSearch) -> Option<Vec<Conversation>> {
+        match search {
+            ConvSearch::Name(name) => {
+                let result: Vec<&Conversation> = self
+                    .convs
+                    .iter()
+                    .filter(|c| c.borrow().name().contains(&name))
+                    .collect();
+                if result.len() == 0 {
+                    None
+                } else {
+                    Some(result.iter().map(|c| Conversation::clone(c)).collect())
+                }
+            }
+            ConvSearch::Members(users) => {
+                let result: Vec<&Conversation> = self
+                    .convs
+                    .iter()
+                    .filter(|c| {
+                        let c = c.borrow();
+                        let mems = c.members();
+                        users.iter().all(|u| mems.contains(u))
+                    })
+                    .collect();
+                if result.len() == 0 {
+                    None
+                } else {
+                    Some(result.iter().map(|c| Conversation::clone(c)).collect())
+                }
+            }
         }
     }
 
@@ -756,6 +802,11 @@ pub struct ConvInfo {
 }
 
 pub type Conversation = Rc<RefCell<ConvInfo>>;
+
+enum ConvSearch {
+    Name(String),
+    Members(Vec<User>),
+}
 
 impl ConvInfo {
     pub fn new(name: &str, members: Vec<User>) -> ConvInfo {

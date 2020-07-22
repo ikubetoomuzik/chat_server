@@ -1,1 +1,5 @@
+# Format of the relationships:
+# UUIDv4_for_mem1;UUIDv4_for_mem2;RelStatus,
+# RelStatus can be of the format:
+# (Neutral,|Friends,|BestFriends,|Blocked,UUIDv4_for_mem_that_blocked_first)
 9197c428-26e8-440a-a239-50ef19e1dc66;0d77f40a-655b-4b9b-b077-8b96c1f423d9;Friends,

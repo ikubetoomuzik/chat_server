@@ -1,1 +1,5 @@
+# Format of the conversation file:
+# UUIDv4_for_conv;conv_name;comma_seperated_list_of_UUIDv4_for_members;time_of_creation;time_of_last_message
 b175b943-38c8-4182-90b9-dacaa88d5f9b;Basic;9197c428-26e8-440a-a239-50ef19e1dc66,0d77f40a-655b-4b9b-b077-8b96c1f423d9;2020-05-12T04:59:57+00:00;2020-05-12T04:59:57+00:00
+d2d9090b-c9d5-4913-aab0-9c1c59e82ba4;Basic2;9197c428-26e8-440a-a239-50ef19e1dc66,fa85cfcb-183d-4b3c-b89e-68736d22d0f8;2020-07-12T04:59:57+00:00;2020-07-12T04:59:57+00:00
+814f951e-ebd7-47e9-8791-32026ff68390;Basic2;0d77f40a-655b-4b9b-b077-8b96c1f423d9,fa85cfcb-183d-4b3c-b89e-68736d22d0f8;2020-07-18T04:59:57+00:00;2020-07-18T04:59:57+00:00
