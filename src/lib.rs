@@ -63,6 +63,11 @@ pub struct App {
     start: DateTime<Utc>,
 }
 
+enum ConvSearch {
+    Name(String),
+    Members(Vec<User>),
+}
+
 impl App {
     pub fn new() -> App {
         App {
@@ -77,7 +82,6 @@ impl App {
     pub fn execute(&mut self, req: String) -> String {
         let mut req = req.split(" ");
         match req.next().unwrap() {
-
             "GET" => match req.next().unwrap() {
                 "USER" => {
                     let mut mult = false;
@@ -125,7 +129,48 @@ impl App {
                     }
                 }
 
-                "CONV" => String::new(),
+                "CONV" => {
+                    let option = req.next().unwrap_or("NONE");
+                    let search = req.next().unwrap_or("NONE");
+                    let extra = req.next().unwrap_or("NONE");
+                    if option == "NONE" || search == "NONE" {
+                        return String::from("INCOMPLETE COMMAND");
+                    }
+                    match option {
+                        "NAME" => {
+                            let search = ConvSearch::Name(String::from(search.trim()));
+                            let result = match self.get_conv(search) {
+                                Some(c) => c,
+                                None => return String::from("NO CONVS FOUND"),
+                            };
+                            let result = result.borrow();
+                            result.to_string()
+                        }
+                        "MEMBERS" => {
+                            let mut search : Vec<&str> = search.split(|c| c == ',' || c == '\n').collect();
+                            println!("{:#?}",search);
+                            search.pop();
+                            println!("{:#?}",search);
+                            if search.len() == 0 {
+                                return String::from("NO VALID USERS PROVIDED");
+                            }
+                            let search : Vec<Option<User>> = search.iter().map(|id| self.get_user("ID",id)).collect();
+                            if search.contains(&None) {
+                                return String::from("INVALID USER PROVIDED");
+                            }
+                            let search = search.iter().map(|u| User::clone(u.as_ref().unwrap())).collect();
+                            let search = ConvSearch::Members(search);
+                            let result = match self.get_conv(search) {
+                                Some(c) => c,
+                                None => return String::from("NO CONVS FOUND"),
+                            };
+                            let result = result.borrow();
+                            result.to_string()
+                        }
+                        "MULT" => String::new(),
+                        _ => String::new(),
+                    }
+                }
                 "REL" => String::new(),
                 "MSG" => String::new(),
                 _ => panic!(),
@@ -288,7 +333,7 @@ impl App {
     pub fn get_user(&self, option: &str, search: &str) -> Option<User> {
         let mut users = self.users.iter();
         match option {
-            "ID" => match users.find(|u| u.borrow().id().to_string() == search) {
+            "ID" => match users.find(|u| u.borrow().id().to_string() == search.trim()) {
                 Some(ur) => Some(Rc::clone(ur)),
                 None => None,
             },
@@ -340,36 +385,27 @@ impl App {
             ))))
     }
 
-    pub fn get_conv(&self, name: Option<&str>, members: Option<Vec<User>>) -> Option<Conversation> {
-        if name == None && members == None {
-            None
-        } else if name != None && members == None {
-            match self
-                .convs
-                .iter()
-                .find(|c| c.borrow().name() == name.unwrap())
-            {
-                Some(cr) => Some(Conversation::clone(cr)),
-                None => None,
+    fn get_conv(&self, search: ConvSearch) -> Option<Conversation> {
+        match search {
+            ConvSearch::Name(name) => {
+                match self
+                    .convs
+                    .iter()
+                    .find(|c| c.borrow().name().contains(&name))
+                {
+                    Some(c) => Some(Conversation::clone(c)),
+                    None => None,
+                }
             }
-        } else if name == None && members != None {
-            let members = members.unwrap();
-            match self
-                .convs
-                .iter()
-                .find(move |c| members.iter().all(move |m| c.borrow().members.contains(m)))
-            {
-                Some(cr) => Some(Conversation::clone(cr)),
-                None => None,
-            }
-        } else {
-            let members = members.unwrap();
-            match self.convs.iter().find(move |c| {
-                c.borrow().name() == name.unwrap()
-                    && members.iter().all(move |m| c.borrow().members.contains(m))
-            }) {
-                Some(cr) => Some(Conversation::clone(cr)),
-                None => None,
+            ConvSearch::Members(users) => {
+                match self.convs.iter().find(|c| {
+                    let c = c.borrow();
+                    let mems = c.members();
+                    users.iter().all(|u| mems.contains(u))
+                }) {
+                    Some(c) => Some(Conversation::clone(c)),
+                    None => None,
+                }
             }
         }
     }
@@ -508,7 +544,6 @@ impl App {
         println!("Goodbye! :)");
         Ok(())
     }
-
 }
 
 // Message Struct
@@ -773,5 +808,9 @@ impl ConvInfo {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn members(&self) -> &Vec<User> {
+        &self.members
     }
 }
