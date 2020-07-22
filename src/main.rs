@@ -15,14 +15,13 @@ fn main() -> Result<(), &'static str> {
     // let users = app.get_user_mult(Some("s "), Some("mail"));
     // let convs = app.get_conv_mult(Some("bas"), None);
 
-    let curtis = app.get_user(Some("Curtis Jones"), None).unwrap();
+    let curtis = app.get_user("NAME","Curtis Jones").unwrap();
     println!("{:#?}", curtis);
-    let sarah = app.get_user(Some("Sarah Parsons"), None).unwrap();
+    let sarah = app.get_user("NAME","Sarah Parsons").unwrap();
 
     println!("{:#?}", app.get_rel_status(curtis, sarah));
 
-    app.listen(8080);
-
+    TcpServer::listen(8080, &mut app);
     // app.add_user("Curtis Jones", "mail@curtisjones.ca")?;
 
     app.close("msgs", "convs", "users", "rels")

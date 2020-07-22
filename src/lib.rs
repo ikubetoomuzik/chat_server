@@ -9,13 +9,37 @@ use std::{
     fs::{read_to_string, OpenOptions},
     io,
     io::prelude::*,
+    net::{SocketAddr, TcpListener},
     rc::Rc,
 };
 use uuid::Uuid;
 
 // TCP server.
 
-mod tcp;
+#[derive(Debug)]
+pub struct TcpServer;
+
+impl TcpServer {
+    pub fn listen(port: u16, app: &mut App) {
+        let addr = SocketAddr::from(([127, 0, 0, 1], port));
+        let listener = TcpListener::bind(&addr).unwrap();
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            let mut buffer = [0; 512];
+            stream.read(&mut buffer).unwrap();
+            let req = String::from_utf8_lossy(&buffer[..]);
+            if req.starts_with("END") {
+                break;
+            } else {
+                stream
+                    .write(app.execute(req.to_string()).as_bytes())
+                    .unwrap();
+                stream.flush().unwrap();
+            }
+            println!("Request: {}", &req);
+        }
+    }
+}
 
 // Interface-------------------------------------------------------------
 // Command Struct
@@ -37,7 +61,6 @@ pub struct App {
     msgs: Vec<Message>,
     rels: Vec<Relationship>,
     start: DateTime<Utc>,
-    tcp: tcp::TcpServer,
 }
 
 impl App {
@@ -48,21 +71,67 @@ impl App {
             msgs: Vec::new(),
             rels: Vec::new(),
             start: Utc::now(),
-            tcp: tcp::TcpServer::new(4),
         }
     }
 
-    pub fn listen(&mut self, port: u16) {
-        self.tcp.bind(port);
-        for stream in self.tcp.listener.as_ref().unwrap().incoming() {
-            let mut stream = stream.unwrap();
-            let mut buffer = [0; 512];
-            stream.read(&mut buffer).unwrap();
-            let req = String::from_utf8_lossy(&buffer[..]);
-            if req.starts_with("END") {
-                break;
-            }
-            println!("Request: {}", &req);
+    pub fn execute(&mut self, req: String) -> String {
+        let mut req = req.split(" ");
+        match req.next().unwrap() {
+
+            "GET" => match req.next().unwrap() {
+                "USER" => {
+                    let mut mult = false;
+                    let option = match req.next() {
+                        Some(o) => {
+                            if !["ID", "NAME", "EMAIL", "MULT"].contains(&o) {
+                                return String::from("INVALID GET USER <_> COMMAND");
+                            }
+                            if o == "MULT" {
+                                mult = true;
+                                match req.next() {
+                                    Some(opt) => opt,
+                                    None => {
+                                        return String::from("NO OPTION OR SEARCH TERM PROVIDED")
+                                    }
+                                }
+                            } else {
+                                o
+                            }
+                        }
+                        None => return String::from("NO OPTION PROVIDED"),
+                    };
+                    let search = match req.next() {
+                        Some(s) => s,
+                        None => return String::from("NO SEARCH TERM PROVIDED"),
+                    };
+                    if mult {
+                        let users = self.get_user_mult(option, search.trim());
+                        let users = match users {
+                            Some(usrs) => usrs,
+                            None => return String::from("NO USERS FOUND"),
+                        };
+                        users.iter().fold(String::new(), |acc, u| {
+                            let u = u.borrow();
+                            format!("{}{}", acc, u.to_string())
+                        })
+                    } else {
+                        let user = self.get_user(option, search.trim());
+                        let user = match user {
+                            Some(usr) => usr,
+                            None => return String::from("NO USER FOUND"),
+                        };
+                        let user = user.borrow();
+                        user.to_string()
+                    }
+                }
+
+                "CONV" => String::new(),
+                "REL" => String::new(),
+                "MSG" => String::new(),
+                _ => panic!(),
+            },
+
+            _ => String::from("NOT GET"),
         }
     }
 
@@ -185,13 +254,20 @@ impl App {
         Ok(())
     }
 
-    pub fn get_rel_status(&self, user1: User, user2: User) -> RelStatus {
+    pub fn get_rel_status(&mut self, user1: User, user2: User) -> RelStatus {
         let user1 = user1.borrow().id();
         let user2 = user2.borrow().id();
 
-        match self.rels.iter().find(|r| { r.members.contains(&user1) && r.members.contains(&user2) }) {
+        match self
+            .rels
+            .iter()
+            .find(|r| r.members.contains(&user1) && r.members.contains(&user2))
+        {
             Some(rel) => rel.status(),
-            None => RelStatus::Neutral,
+            None => {
+                self.rels.push(Relationship::new([user1, user2], None));
+                RelStatus::Neutral
+            }
         }
     }
 
@@ -209,70 +285,46 @@ impl App {
         }
     }
 
-    fn _find_user_id(&self, id: String) -> Option<User> {
-        match self
-            .users
-            .iter()
-            .find(|u| u.borrow().id().to_string() == id)
-        {
-            Some(ur) => Some(Rc::clone(ur)),
-            None => None,
-        }
-    }
-
-    pub fn get_user(&self, name: Option<&str>, email: Option<&str>) -> Option<User> {
-        if name == None && email == None {
-            None
-        } else if name == None && email != None {
-            match self
-                .users
-                .iter()
-                .find(|u| u.borrow().email() == email.unwrap())
-            {
-                Some(ur) => Some(User::clone(ur)),
+    pub fn get_user(&self, option: &str, search: &str) -> Option<User> {
+        let mut users = self.users.iter();
+        match option {
+            "ID" => match users.find(|u| u.borrow().id().to_string() == search) {
+                Some(ur) => Some(Rc::clone(ur)),
                 None => None,
-            }
-        } else if name != None && email == None {
-            match self
-                .users
-                .iter()
-                .find(|u| u.borrow().name() == name.unwrap())
-            {
-                Some(ur) => Some(User::clone(ur)),
-                None => None,
-            }
-        } else {
-            match self.users.iter().find(|u| {
-                u.borrow().name() == name.unwrap() && u.borrow().email() == email.unwrap()
+            },
+            "NAME" => match users.find(|u| {
+                u.borrow()
+                    .name()
+                    .to_lowercase()
+                    .contains(&search.to_lowercase())
             }) {
-                Some(ur) => Some(User::clone(ur)),
+                Some(ur) => Some(Rc::clone(ur)),
                 None => None,
-            }
+            },
+            "EMAIL" => match users.find(|u| {
+                u.borrow()
+                    .email()
+                    .to_lowercase()
+                    .contains(&search.to_lowercase())
+            }) {
+                Some(ur) => Some(Rc::clone(ur)),
+                None => None,
+            },
+            _ => None,
         }
     }
 
-    pub fn get_user_mult(&self, name: Option<&str>, email: Option<&str>) -> Option<Vec<User>> {
+    pub fn get_user_mult(&self, option: &str, search: &str) -> Option<Vec<User>> {
         let mut list = Vec::new();
-        if name == None && email == None {
-            return None;
-        } else if name == None && email != None {
-            self.users
-                .iter()
-                .filter(|u| u.borrow().email().to_lowercase().contains(email.unwrap()))
-                .for_each(|u| list.push(User::clone(u)));
-        } else if name != None && email == None {
-            self.users
-                .iter()
-                .filter(|u| u.borrow().name().to_lowercase().contains(name.unwrap()))
-                .for_each(|u| list.push(User::clone(u)));
-        } else {
-            self.users
-                .iter()
-                .filter(|u| {
-                    u.borrow().name().to_lowercase().contains(name.unwrap())
-                        && u.borrow().email().to_lowercase().contains(email.unwrap())
-                })
-                .for_each(|u| list.push(User::clone(u)));
+        let users = self.users.iter();
+        match option {
+            "EMAIL" => users
+                .filter(|u| u.borrow().email().to_lowercase().contains(search))
+                .for_each(|u| list.push(User::clone(u))),
+            "NAME" => users
+                .filter(|u| u.borrow().name().to_lowercase().contains(search))
+                .for_each(|u| list.push(User::clone(u))),
+            _ => {}
         }
         if list.is_empty() {
             None
@@ -399,7 +451,6 @@ impl App {
                 return Err("Error writing messages file!");
             }
         }
-
         let convs = self
             .convs
             .drain(..)
@@ -418,7 +469,6 @@ impl App {
                 return Err("Error writing conversations file!");
             }
         }
-
         let users = self
             .users
             .drain(..)
@@ -437,7 +487,6 @@ impl App {
                 return Err("Error writing users file!");
             }
         }
-
         let rels = self
             .rels
             .drain(..)
@@ -456,10 +505,10 @@ impl App {
                 return Err("Error writing users file!");
             }
         }
-
         println!("Goodbye! :)");
         Ok(())
     }
+
 }
 
 // Message Struct
